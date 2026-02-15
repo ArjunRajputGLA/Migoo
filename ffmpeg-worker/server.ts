@@ -54,9 +54,10 @@ app.post('/clip', async (req, res) => {
         console.log(`[worker] Processing clip: ${fileName} (${startTime}s - ${endTime}s)`);
 
         // 1. Download video (Streaming)
-        console.log(`[worker] Downloading from ${inputUrl}...`);
+        // 1. Download video (Streaming)
+        console.log(`[worker] streaming download enabled`);
         const response = await fetch(inputUrl);
-        if (!response.ok) throw new Error(`Failed to fetch video: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Failed to fetch video`);
         if (!response.body) throw new Error("No response body");
 
         const fileStream = fs.createWriteStream(tempInput);
@@ -76,12 +77,14 @@ app.post('/clip', async (req, res) => {
         // Calculate 9:16 aspect ratio scaling and padding
         const filterComplex = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2";
 
-        const command = `ffmpeg -ss ${startTime} -to ${endTime} -i "${tempInput}" -vf "${filterComplex}" -c:v libx264 -c:a aac -preset ultrafast -crf 28 -threads 1 -y "${tempOutput}"`;
+        const command = `ffmpeg -ss ${startTime} -to ${endTime} -i "${tempInput}" -vf "${filterComplex}" -c:v libx264 -c:a aac -preset ultrafast -crf 30 -threads 1 -y "${tempOutput}"`;
 
-        console.log(`[worker] Running FFmpeg: ${command}`);
+        console.log(`[worker] ffmpeg started`);
+        console.log(`[worker] Running: ${command}`);
         await execAsync(command);
         console.log(`[worker] FFmpeg execution complete`);
 
+        // 3. Upload to Supabase (Streaming)
         // 3. Upload to Supabase (Streaming)
         console.log(`[worker] Uploading to processed-videos...`);
 
@@ -103,6 +106,7 @@ app.post('/clip', async (req, res) => {
             console.error("[worker] Upload error:", error);
             throw error;
         }
+        console.log("[worker] upload complete");
 
         // 4. Get Public URL
         const { data: publicUrlData } = supabase.storage
@@ -145,9 +149,10 @@ app.post('/extract-audio', async (req, res) => {
         console.log(`[worker] Extracting audio from: ${inputUrl}`);
 
         // 1. Download video (Streaming)
-        console.log(`[worker] Downloading...`);
+        // 1. Download video (Streaming)
+        console.log(`[worker] streaming download enabled`);
         const response = await fetch(inputUrl);
-        if (!response.ok) throw new Error(`Failed to fetch video: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Failed to fetch video`);
         if (!response.body) throw new Error("No response body");
 
         const fileStream = fs.createWriteStream(tempInput);
@@ -163,7 +168,8 @@ app.post('/extract-audio', async (req, res) => {
         // Added -threads 1 for low memory
         const command = `ffmpeg -i "${tempInput}" -ac 1 -ar 16000 -vn -threads 1 -y "${tempOutput}"`;
 
-        console.log(`[worker] Running FFmpeg: ${command}`);
+        console.log(`[worker] ffmpeg started`);
+        console.log(`[worker] Running: ${command}`);
         await execAsync(command);
         console.log(`[worker] Audio extraction complete`);
 
@@ -191,6 +197,7 @@ app.post('/extract-audio', async (req, res) => {
             console.error("[worker] Upload error:", error);
             throw error;
         }
+        console.log("[worker] upload complete");
 
         // 5. Get Public URL
         const { data: publicUrlData } = supabase.storage
