@@ -1,4 +1,5 @@
 import express from 'express';
+import { Readable } from 'stream';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
@@ -52,44 +53,50 @@ app.post('/clip', async (req, res) => {
     try {
         console.log(`[worker] Processing clip: ${fileName} (${startTime}s - ${endTime}s)`);
 
-        // 1. Download video
+        // 1. Download video (Streaming)
         console.log(`[worker] Downloading from ${inputUrl}...`);
         const response = await fetch(inputUrl);
         if (!response.ok) throw new Error(`Failed to fetch video: ${response.statusText}`);
+        if (!response.body) throw new Error("No response body");
 
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(tempInput, Buffer.from(buffer));
+        const fileStream = fs.createWriteStream(tempInput);
+        await new Promise((resolve, reject) => {
+            // @ts-ignore: specific to Node 18+ native fetch
+            Readable.fromWeb(response.body as any).pipe(fileStream);
+            fileStream.on("finish", resolve);
+            fileStream.on("error", reject);
+        });
         console.log(`[worker] Saved to ${tempInput}`);
 
         // 2. Run FFmpeg
         // -ss (start) -to (end) -i (input) 
         // -vf ... (scale to 9:16 vertical 1080x1920)
-        // -c:v libx264 -c:a aac -preset fast
+        // -c:v libx264 -c:a aac -preset ultrafast -crf 28 -threads 1 (LOW MEMORY)
 
         // Calculate 9:16 aspect ratio scaling and padding
-        // force_original_aspect_ratio=decrease ensures the video fits within 1080x1920
-        // pad ensures the output is exactly 1080x1920 with black bars if needed
         const filterComplex = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2";
 
-        const command = `ffmpeg -ss ${startTime} -to ${endTime} -i "${tempInput}" -vf "${filterComplex}" -c:v libx264 -c:a aac -preset fast -y "${tempOutput}"`;
+        const command = `ffmpeg -ss ${startTime} -to ${endTime} -i "${tempInput}" -vf "${filterComplex}" -c:v libx264 -c:a aac -preset ultrafast -crf 28 -threads 1 -y "${tempOutput}"`;
 
         console.log(`[worker] Running FFmpeg: ${command}`);
         await execAsync(command);
         console.log(`[worker] FFmpeg execution complete`);
 
-        // 3. Upload to Supabase
+        // 3. Upload to Supabase (Streaming)
         console.log(`[worker] Uploading to processed-videos...`);
-        const fileContent = fs.readFileSync(tempOutput);
 
         // Check local file size
         const stats = fs.statSync(tempOutput);
         console.log(`[worker] Output file size: ${stats.size} bytes`);
 
+        const fileContent = fs.createReadStream(tempOutput);
+
         const { data, error } = await supabase.storage
             .from('processed-videos')
             .upload(fileName, fileContent, {
                 contentType: 'video/mp4',
-                upsert: true
+                upsert: true,
+                duplex: 'half' // Required for node streaming uploads in some client versions
             });
 
         if (error) {
@@ -137,17 +144,24 @@ app.post('/extract-audio', async (req, res) => {
     try {
         console.log(`[worker] Extracting audio from: ${inputUrl}`);
 
-        // 1. Download video
+        // 1. Download video (Streaming)
         console.log(`[worker] Downloading...`);
         const response = await fetch(inputUrl);
         if (!response.ok) throw new Error(`Failed to fetch video: ${response.statusText}`);
+        if (!response.body) throw new Error("No response body");
 
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(tempInput, Buffer.from(buffer));
+        const fileStream = fs.createWriteStream(tempInput);
+        await new Promise((resolve, reject) => {
+            // @ts-ignore: specific to Node 18+ native fetch
+            Readable.fromWeb(response.body as any).pipe(fileStream);
+            fileStream.on("finish", resolve);
+            fileStream.on("error", reject);
+        });
 
         // 2. Run FFmpeg (extract audio: pcm_s16le, 16kHz, mono)
         // Command: ffmpeg -i input.mp4 -ac 1 -ar 16000 -vn output.wav
-        const command = `ffmpeg -i "${tempInput}" -ac 1 -ar 16000 -vn -y "${tempOutput}"`;
+        // Added -threads 1 for low memory
+        const command = `ffmpeg -i "${tempInput}" -ac 1 -ar 16000 -vn -threads 1 -y "${tempOutput}"`;
 
         console.log(`[worker] Running FFmpeg: ${command}`);
         await execAsync(command);
@@ -161,15 +175,16 @@ app.post('/extract-audio', async (req, res) => {
             console.warn("[worker] Extracted audio is very small!");
         }
 
-        // 4. Upload to Supabase
+        // 4. Upload to Supabase (Streaming)
         console.log(`[worker] Uploading to processed-videos as ${storageFileName}...`);
-        const fileContent = fs.readFileSync(tempOutput);
+        const fileContent = fs.createReadStream(tempOutput);
 
         const { data, error } = await supabase.storage
             .from('processed-videos')
             .upload(storageFileName, fileContent, {
                 contentType: 'audio/wav',
-                upsert: true
+                upsert: true,
+                duplex: 'half'
             });
 
         if (error) {
@@ -204,4 +219,5 @@ app.post('/extract-audio', async (req, res) => {
 
 app.listen(PORT, () => {
     console.log("FFmpeg worker running on port", PORT);
+    console.log("[worker] running in low-memory streaming mode");
 });
