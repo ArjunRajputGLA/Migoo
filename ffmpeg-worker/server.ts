@@ -34,6 +34,11 @@ if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir);
 }
 
+// Health check
+app.get('/', (req, res) => {
+    res.status(200).send("FFmpeg worker alive");
+});
+
 app.post('/clip', async (req, res) => {
     const { inputUrl, startTime, endTime, fileName } = req.body;
 
@@ -118,7 +123,7 @@ app.post('/clip', async (req, res) => {
 });
 
 app.post('/extract-audio', async (req, res) => {
-    const { inputUrl } = req.body;
+    const { inputUrl, fileName } = req.body;
 
     if (!inputUrl) {
         return res.status(400).json({ error: "Missing required parameter: inputUrl" });
@@ -126,8 +131,8 @@ app.post('/extract-audio', async (req, res) => {
 
     const tempInput = path.join(tempDir, `audio_input_${Date.now()}.mp4`);
     const tempOutput = path.join(tempDir, `audio_output_${Date.now()}.wav`);
-    // Unique filename for storage
-    const storageFileName = `audio_${Date.now()}.wav`;
+    // Use provided fileName (sanitized) or generate unique one
+    const storageFileName = fileName ? `${fileName}_audio.wav` : `audio_${Date.now()}.wav`;
 
     try {
         console.log(`[worker] Extracting audio from: ${inputUrl}`);
@@ -141,7 +146,8 @@ app.post('/extract-audio', async (req, res) => {
         fs.writeFileSync(tempInput, Buffer.from(buffer));
 
         // 2. Run FFmpeg (extract audio: pcm_s16le, 16kHz, mono)
-        const command = `ffmpeg -i "${tempInput}" -vn -acodec pcm_s16le -ar 16000 -ac 1 -y "${tempOutput}"`;
+        // Command: ffmpeg -i input.mp4 -ac 1 -ar 16000 -vn output.wav
+        const command = `ffmpeg -i "${tempInput}" -ac 1 -ar 16000 -vn -y "${tempOutput}"`;
 
         console.log(`[worker] Running FFmpeg: ${command}`);
         await execAsync(command);
@@ -197,5 +203,5 @@ app.post('/extract-audio', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`FFmpeg worker running on http://localhost:${PORT}`);
+    console.log("FFmpeg worker running on port", PORT);
 });
