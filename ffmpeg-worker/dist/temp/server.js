@@ -165,4 +165,4 @@ app.post('/extract-audio', async (req, res) => {
 });
 app.listen(PORT, () => {
     console.log(`FFmpeg worker running on http://localhost:${PORT}`);
-});
+}); 

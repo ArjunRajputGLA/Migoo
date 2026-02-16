@@ -29,11 +29,9 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Ensure temp directory exists
-const tempDir = path.join(__dirname, 'temp');
-if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir);
-}
+// Use /tmp on Render (read-only filesystem except /tmp)
+const tempDir = '/tmp';
+console.log("[worker] temp dir:", tempDir);
 
 // Health check
 app.get('/', (req, res) => {
