@@ -59,7 +59,7 @@ app.post('/clip', async (req, res) => {
         if (!response.body) throw new Error("No response body");
 
         const fileStream = fs.createWriteStream(tempInput);
-        await new Promise((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
             // @ts-ignore: specific to Node 18+ native fetch
             Readable.fromWeb(response.body as any).pipe(fileStream);
             fileStream.on("finish", resolve);
@@ -84,14 +84,13 @@ app.post('/clip', async (req, res) => {
 
         // 3. Upload to Supabase (Streaming)
         // 3. Upload to Supabase (Streaming)
-        console.log(`[worker] Uploading to processed-videos...`);
-
         // Check local file size
         const stats = fs.statSync(tempOutput);
         console.log(`[worker] Output file size: ${stats.size} bytes`);
 
         const fileContent = fs.createReadStream(tempOutput);
 
+        console.log("[worker] uploading to bucket: processed-videos");
         const { data, error } = await supabase.storage
             .from('processed-videos')
             .upload(fileName, fileContent, {
@@ -101,10 +100,10 @@ app.post('/clip', async (req, res) => {
             });
 
         if (error) {
-            console.error("[worker] Upload error:", error);
+            console.error("[worker] upload failed:", error);
             throw error;
         }
-        console.log("[worker] upload complete");
+        console.log("[worker] upload success:", fileName);
 
         // 4. Get Public URL
         const { data: publicUrlData } = supabase.storage
@@ -154,7 +153,7 @@ app.post('/extract-audio', async (req, res) => {
         if (!response.body) throw new Error("No response body");
 
         const fileStream = fs.createWriteStream(tempInput);
-        await new Promise((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
             // @ts-ignore: specific to Node 18+ native fetch
             Readable.fromWeb(response.body as any).pipe(fileStream);
             fileStream.on("finish", resolve);
@@ -180,9 +179,9 @@ app.post('/extract-audio', async (req, res) => {
         }
 
         // 4. Upload to Supabase (Streaming)
-        console.log(`[worker] Uploading to processed-videos as ${storageFileName}...`);
         const fileContent = fs.createReadStream(tempOutput);
 
+        console.log("[worker] uploading to bucket: processed-videos");
         const { data, error } = await supabase.storage
             .from('processed-videos')
             .upload(storageFileName, fileContent, {
@@ -192,10 +191,10 @@ app.post('/extract-audio', async (req, res) => {
             });
 
         if (error) {
-            console.error("[worker] Upload error:", error);
+            console.error("[worker] upload failed:", error);
             throw error;
         }
-        console.log("[worker] upload complete");
+        console.log("[worker] upload success:", storageFileName);
 
         // 5. Get Public URL
         const { data: publicUrlData } = supabase.storage
